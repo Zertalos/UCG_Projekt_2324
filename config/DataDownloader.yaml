@@ -1,0 +1,5 @@
+data_url:
+  - https://analytics.urbanpulse.de/files/hackathon2019/Darmstadt_20181229-20190111.csv
+enable_auto_download: True
+target_folder: data
+force_download: False
