@@ -1,4 +1,4 @@
-out/**
-data/**
+out/*
+data/*
 .idea/
 venv/
