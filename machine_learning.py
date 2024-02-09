@@ -9,6 +9,8 @@ config_store = ConfigStoreManager()[ConfigStoreManager.MAIN_CONFIG_NAME]
 
 BASE_OUTPUT_FOLDER = config_store["output_folder"]
 
+checkpoint_path = './checkpoints/ui_poc'
+
 
 def prepare():
     print(f"TensorFlow version = {tf.__version__}\n")
@@ -40,65 +42,37 @@ def prepare():
 
     # Set a fixed random seed value, for reproducibility, this will allow us to get
     # the same random numbers each time the notebook is run
-    SEED = 1337
+    SEED = 191285461
     np.random.seed(SEED)
     tf.random.set_seed(SEED)
 
-    # the list of gestures that data is available for
-    classification = [
-        "through-traffic"
-    ]
-
-    SAMPLES_PER_CLASSIFICATION = 1  # TODO
-
-    NUM_CLASSIFICATIONS = len(classification)
-
-    # create a one-hot encoded matrix that is used in the output
-    ONE_HOT_ENCODED_CLASSIFICATIONS = np.eye(NUM_CLASSIFICATIONS)
-
-    # read each csv file and push an input and output
-    # NOTE extendable for extra classifications (only 1 rn)
     inputs = []
     outputs = []
-    for index, classification in enumerate(classification):
-        print(f"Processing '{classification}'.")
 
-        output = ONE_HOT_ENCODED_CLASSIFICATIONS[index]
+    window = 5
+    for drive in drives:
+        tensor = []
+        # for i in range(0, len(drive) - window + 1, window):  # segmenting window
+        for i in range(0, len(drive) - window + 1, 1):  # sliding window
+            inputs.append(drive[i:i + window][:-1])
+            outputs.append(drive[0][-1])
 
-        # TODO adjust for own data
-        # calculate the number of gesture recordings in the file
-        window = 5
-        for drive in drives:
-            tensor = []
-            for i in range(0, len(drive) - window + 1, window):  # segmenting window
-                # for i in range(0, len(drive)-window+1, 1): #sliding window
-                inputs.append(drive[i:i + window][:-1])
-                outputs.append(drive[0][-1])
-
-    ##            print("----------------")
-    ##            for i in tensor:
-    ##                print(i)
-
-    # convert the list to numpy array
-    inputs = np.array(inputs)
-    outputs = np.array(outputs)
+    inputs = np.array(inputs).astype('float32')
+    outputs = np.array(outputs).astype('float32').reshape((-1, 1))
 
     print("Data set parsing and preparation complete.")
     return inputs, outputs
 
 
 def train(inputs, outputs):
-    # Randomize the order of the inputs, so they can be evenly distributed for training, testing, and validation
     # https://stackoverflow.com/a/37710486/2020087
     num_inputs = len(inputs)
     randomize = np.arange(num_inputs)
     np.random.shuffle(randomize)
 
-    # Swap the consecutive indexes (0, 1, 2, etc) with the randomized indexes
     inputs = inputs[randomize]
     outputs = outputs[randomize]
 
-    # Split the recordings (group of samples) into three sets: training, testing and validation
     TRAIN_SPLIT = int(0.6 * num_inputs)
     TEST_SPLIT = int(0.2 * num_inputs + TRAIN_SPLIT)
 
@@ -106,27 +80,41 @@ def train(inputs, outputs):
     outputs_train, outputs_test, outputs_validate = np.split(outputs, [TRAIN_SPLIT, TEST_SPLIT])
 
     print("Data set randomization and splitting complete.")
-
+    # callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=5)
     # build the model and train it
-    model = tf.keras.Sequential()
-    model.add(tf.keras.layers.Dense(50, activation='relu'))  # relu is used for performance
-    model.add(tf.keras.layers.Dense(15, activation='relu'))
-    model.add(tf.keras.layers.Dense(1,
-                                    activation='softmax'))  # softmax is used, because we only expect one gesture to occur per input
-    model.compile(optimizer='rmsprop', loss='mse', metrics=['mae'])
-    history = model.fit(inputs_train, outputs_train, epochs=600, batch_size=1,
-                        validation_data=(inputs_validate, outputs_validate))
-    model.save_weights('./checkpoints/ui_poc')
+    model = create_model()
+    history = model.fit(inputs_train, outputs_train, epochs=10, batch_size=32,
+                        validation_data=(inputs_validate, outputs_validate))  # , callbacks=[callback])
+    model.save_weights(checkpoint_path)
+    model.summary()
+    return model, inputs_test, outputs_test
     print("Data set training complete.")
 
 
-def run():
-    # use the model to predict the test inputs
-    predictions = model.predict(inputs_test)
+def create_model():
+    model = tf.keras.Sequential()
+    model.add(tf.keras.layers.Flatten())
+    model.add(tf.keras.layers.Dense(100, activation='relu'))
+    model.add(tf.keras.layers.Dense(50, activation='relu'))
+    model.add(tf.keras.layers.Dense(40, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(30, activation='relu'))
+    model.add(tf.keras.layers.Dense(1, activation='sigmoid'))
+    model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
+    #    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3), loss="sparse_categorical_crossentropy", metrics=['accuracy','mse'])
+    return model
 
-    # print the predictions and the expected ouputs
-    print("predictions =\n", np.round(predictions, decimals=3))
-    print("actual =\n", outputs_test)
+
+def run(model, inputs_test, outputs_test):
+    # use the model to predict the test inputs
+    model.evaluate(inputs_test, outputs_test, batch_size=1)
 
 
 inputs = []
@@ -134,6 +122,14 @@ outputs = []
 
 if __name__ == '__main__':
     inputs, outputs = prepare()
-    train(inputs, outputs)
-    run()
+    model, inputs_test, outputs_test = train(inputs, outputs)
+    # model = create_model()
+    # model.load_weights(checkpoint_path)
+    run(model, inputs_test, outputs_test)
+    while True:
+        i = int(input())
+        print("Input: ", inputs[i:i + 1])
+        print("Prediction:", model.predict(inputs[i:i + 1]))
+        print("Actual:", outputs[i])
+
 
